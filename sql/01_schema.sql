@@ -1,0 +1,5 @@
+DROP SCHEMA IF EXISTS logs CASCADE;
+
+CREATE SCHEMA logs;
+SET SEARCH_PATH = logs,public;
+

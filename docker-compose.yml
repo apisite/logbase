@@ -1,0 +1,31 @@
+# This file used by make for docker-composer container operations
+# including docker image build
+
+version: '2.1'
+
+services:
+  app:
+    image: ${APP_IMAGE}
+    command:
+      --listen=:7070 --path=/data
+    environment:
+      - PGHOST=db
+      - PGPORT=5432
+      - PGDATABASE
+      - PGUSER
+      - PGPASSWORD
+    ports:
+      - "${APP_PORT:-7070}:7070"
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./tmp:/data
+    build:
+      context: .
+    networks:
+       - app-network
+
+networks:
+  app-network:
+    external:
+      name: ${DCAPE_NET}
