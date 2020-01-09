@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v4/pgxpool"
 	"gopkg.in/birkirb/loggers.v1"
 
-	"github.com/apisite/logbase"
+	"github.com/apisite/logbase/nginx"
 )
 
 type Config struct {
