@@ -102,6 +102,7 @@ func (srv *Service) load(cfg *FileConfig, file string, fileID int) {
 	default:
 		err = errors.New("Unknown config type")
 	}
+	loadErr := err
 
 	// file_end
 	db, err := srv.DB.Acquire(ctx)
@@ -112,7 +113,7 @@ func (srv *Service) load(cfg *FileConfig, file string, fileID int) {
 	defer db.Release()
 
 	sql := "select logs.file_after(a_id => $1, a_error => $2, a_total=>$3, a_loaded=>$4, a_skipped=>$5)"
-	if _, err := db.Exec(ctx, sql, fileID, err, total, load, skip); err != nil {
+	if _, err := db.Exec(ctx, sql, fileID, loadErr, total, load, skip); err != nil {
 		srv.Log.Errorf("FileEnd: %v", err)
 	}
 	srv.Log.Printf("File %d load stat: total %d skip %d load %d", fileID, total, skip, load)
