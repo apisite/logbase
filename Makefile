@@ -139,8 +139,8 @@ docker-wait:
 
 dcape-db-create: docker-wait ## Create user, db and load dump
 	@echo "*** $@ ***" ; \
-	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE USER \"$$PGUSER\" WITH PASSWORD '$$PGPASSWORD';" || true ; \
-	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE DATABASE \"$$PGDATABASE\" OWNER \"$$PGUSER\";" || db_exists=1 ; \
+	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE USER \"$$PGUSER\" WITH PASSWORD '$$PGPASSWORD';" 2> >(grep -v "already exists" >&2) || true ; \
+	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE DATABASE \"$$PGDATABASE\" OWNER \"$$PGUSER\";" 2> >(grep -v "already exists" >&2) || db_exists=1 ; \
 	if [[ ! "$$db_exists" ]] ; then \
 	    for f in sql/*.sql ; do cat $$f ; done | docker exec -i $$DCAPE_DB psql -U "$$PGUSER" -1 -X ; \
 	    echo "Restore completed" ; \
@@ -167,7 +167,11 @@ psql: ## Run psql via postgresql docker container
 
 ## Run local psql
 psql-local:
-	@psql -h localhost -p 15432
+	@psql -h localhost
+# -p 15432
+
+psql-local-add:
+	@psql -h localhost -f add.sql
 
 $(CFG):
 	@[ -f $@ ] || { echo "$$CONFIG_DEFAULT" > $@ ; echo "Warning: Created default $@" ; }

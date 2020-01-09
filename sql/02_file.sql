@@ -48,21 +48,3 @@ BEGIN
 END
 $_$;
 
-CREATE OR REPLACE FUNCTION file_after(
-  a_id INTEGER
-, a_total INTEGER
-, a_loaded INTEGER
-, a_skipped INTEGER
-, a_error TEXT
-) RETURNS VOID LANGUAGE 'plpgsql' AS $_$
-BEGIN
-  UPDATE logs.file SET
-    end_at = now()
-  , total = a_total
-  , loaded = a_loaded
-  , skipped = a_skipped
-  , error = a_error
-  WHERE id = a_id;
-  RETURN;
-END
-$_$;
