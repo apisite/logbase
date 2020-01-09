@@ -8,6 +8,9 @@ services:
     image: ${APP_IMAGE}
     command:
       --listen=:7070 --path=/data
+    labels:
+      - "traefik.enable=true"
+      - "traefik.frontend.rule=Host:${APP_SITE}"
     environment:
       - PGHOST=db
       - PGPORT=5432
