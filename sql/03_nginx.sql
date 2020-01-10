@@ -41,6 +41,7 @@ ALTER TABLE agent SET UNLOGGED;
 
 CREATE /* UNLOGGED */ TABLE request_data (
   file_id INTEGER REFERENCES file(id)
+-- TODO: ,  request_id INTEGER NOT NULL
 , stamp TIMESTAMP
 , url_id INTEGER REFERENCES url(id)
 , args_id INTEGER REFERENCES args(id)
@@ -62,7 +63,7 @@ CREATE /* UNLOGGED */ TABLE request_data (
 , fload NUMERIC
 --proto = HTTP/1.1
 --t_size = -
-, CONSTRAINT request_data_pkey PRIMARY KEY (file_id, stamp, addr, url_id, args_id)
+--, CONSTRAINT request_data_pkey PRIMARY KEY (file_id, stamp, addr, url_id, args_id)
 );
 
 CREATE OR REPLACE VIEW request AS
@@ -74,8 +75,8 @@ CREATE OR REPLACE VIEW request AS
 ,  ref.data as referer
 ,  ag.data as agent
 FROM request_data rd
-JOIN url u ON(rd.url_id = u.id)     -- pkey, not null
-JOIN args ar ON(rd.args_id = ar.id) -- pkey, not null
+LEFT OUTER JOIN url u ON(rd.url_id = u.id)
+LEFT OUTER JOIN args ar ON(rd.args_id = ar.id)
 LEFT OUTER JOIN url u1 ON(rd.ref_url_id = u1.id)
 LEFT OUTER JOIN args ar1 ON(rd.ref_args_id = ar1.id)
 LEFT OUTER JOIN referer ref ON(rd.referer_id = ref.id)
