@@ -155,7 +155,7 @@ dcape-db-create: docker-wait ## Create user, db and load dump
 	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE USER \"$$PGUSER\" WITH PASSWORD '$$PGPASSWORD';" 2> >(grep -v "already exists" >&2) || true ; \
 	docker exec -i $$DCAPE_DB psql -U postgres -c "CREATE DATABASE \"$$PGDATABASE\" OWNER \"$$PGUSER\";" 2> >(grep -v "already exists" >&2) || db_exists=1 ; \
 	if [[ ! "$$db_exists" ]] ; then \
-	    for f in sql/*.sql ; do cat $$f ; done | docker exec -i $$DCAPE_DB psql -U "$$PGUSER" -1 -X ; \
+	    for f in sql/*.sql ; do cat $$f ; done | docker exec -i $$DCAPE_DB psql -U "$$PGUSER" -1 -X $$PGDATABASE ; \
 	    echo "Restore completed" ; \
 	fi
 
