@@ -7,7 +7,7 @@ services:
   app:
     image: ${APP_IMAGE}
     command:
-      --listen=:7070 --path=/data
+      --listen=:8080 --path=/data
     labels:
       - "traefik.enable=true"
       - "traefik.frontend.rule=Host:${APP_SITE}"

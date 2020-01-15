@@ -22,4 +22,5 @@ WORKDIR /opt/app
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /opt/app/logbase /usr/bin/logbase
 
+EXPOSE 8080
 ENTRYPOINT ["/usr/bin/logbase"]
