@@ -17,7 +17,7 @@ SOURCES       ?= cmd/*/*.go *.go
 # Site host
 APP_SITE      ?= logbase.dev.lan
 
-APP_LISTEN    ?= :7070
+APP_LISTEN    ?= :8080
 
 PGHOST        ?= db
 PGPORT        ?= 5432
