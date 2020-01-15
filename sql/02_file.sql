@@ -29,8 +29,8 @@ CREATE TABLE file (
 , filename  TEXT NOT NULL
 , first     INTEGER
 , last      INTEGER
-, total     INTEGER
-, loaded    INTEGER
+, total     INTEGER DEFAULT 0 -- updated while loading
+, loaded    INTEGER DEFAULT 0 -- updated while loading
 , skipped   INTEGER
 , error     TEXT
 , begin_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -77,4 +77,17 @@ BEGIN
   UPDATE logs.file SET stamp_id = v_id WHERE id = a_file_id;
   RETURN v_id;
 END
+$_$;
+
+CREATE OR REPLACE FUNCTION logs.file_update_stat(
+  a_id INTEGER
+, a_total INTEGER
+, a_loaded INTEGER
+-- TODO: ? add stamp
+) RETURNS VOID LANGUAGE 'sql' AS $_$
+-- TODO: NOTIFY
+UPDATE logs.file SET
+  total = total + a_total
+, loaded = loaded + a_loaded
+WHERE id = a_id
 $_$;

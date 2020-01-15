@@ -42,7 +42,7 @@ ALTER TABLE agent SET UNLOGGED;
 CREATE /* UNLOGGED */ TABLE request_data (
   stamp_id INTEGER REFERENCES stamp(id)
 , row_num INTEGER
--- TODO: file_id NOT NULL (not in key) - interval when row was loaded
+, file_id INTEGER NOT NULL -- (not in key) - allows to get time interval when row was loaded
 -- TODO: ,  request_id INTEGER NOT NULL
 , stamp TIMESTAMP
 , url_id INTEGER REFERENCES url(id)

@@ -2,6 +2,7 @@
 CREATE OR REPLACE FUNCTION request_add(
   a_stamp_id INTEGER
 , a_row_num INTEGER
+, a_file_id INTEGER
 , a_stamp TIMESTAMP
 , a_addr INET
 , a_url TEXT
@@ -83,6 +84,7 @@ begin
 
   INSERT INTO logs.request_data (
     stamp_id
+  , file_id
   , row_num
   , stamp
   , url_id
@@ -99,6 +101,7 @@ begin
   , fload
   ) VALUES (
     a_stamp_id
+  , a_file_id
   , a_row_num
   , a_stamp
   , v_url_id
@@ -119,4 +122,3 @@ begin
   RETURN FOUND; -- true means 'inserted'
 end
 $_$;
-

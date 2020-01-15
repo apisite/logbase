@@ -1,6 +1,7 @@
 package nginx
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,10 +22,11 @@ import (
 )
 
 type Config struct {
-	Channels int    `json:"channels"`
-	Skip     string `json:"skip"` // SkipRegExp
-	Host     string `json:"host"` // HostRegExp
-	Format   string `json:"format"`
+	Channels   int    `json:"channels"`
+	Skip       string `json:"skip"` // SkipRegExp
+	Host       string `json:"host"` // HostRegExp
+	Format     string `json:"format"`
+	UTF8Prefix string `json:"utf8_prefix"` // url with args encoded in utf8 (cp1251 used otherwise)
 }
 
 type Stat struct {
@@ -40,8 +42,13 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	if err = json.Unmarshal([]byte(conf), &config); err != nil {
 		return
 	}
+	if config.UTF8Prefix == "" {
+		config.UTF8Prefix = "/"
+	}
 	// Create reader and call Read method until EOF
-	reader := gonx.NewReader(source, config.Format)
+	// gonx.Reader uses goroutines and row order not fixed, so we use just parser
+	// reader := gonx.NewReader(source, config.Format)
+	parser := gonx.NewParser(config.Format)
 
 	rowsChan := make(chan map[string]interface{})
 	loadedChan := make(chan int, config.Channels)     // get counts of loaded rows
@@ -49,7 +56,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	wg := sync.WaitGroup{}
 	wg.Add(config.Channels)
 	for i := 0; i < config.Channels; i++ {
-		go stream(db, &wg, rowsChan, loadedChan, rowNumChan)
+		go stream(db, i, &wg, rowsChan, loadedChan, rowNumChan)
 	}
 	var reSkip, reHost *regexp.Regexp
 	if reSkip, err = regexp.Compile(config.Skip); err != nil {
@@ -58,16 +65,42 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	if reHost, err = regexp.Compile(config.Host); err != nil {
 		return
 	}
+
+	defer func() {
+		close(rowsChan)
+		wg.Wait()
+		close(loadedChan)
+		close(rowNumChan)
+		for l := range loadedChan {
+			stat.Loaded += l
+		}
+		for i := range rowNumChan {
+			if i > stat.Last {
+				stat.Last = i
+			}
+			if i < stat.First {
+				stat.First = i
+			}
+		}
+	}()
 	var stampID int
 	//defer elapsed("File")()
+
+	reader := bufio.NewReader(source)
 	for {
-		rec, er := reader.Read()
+		line, er := reader.ReadString('\n')
 		if er == io.EOF {
 			fmt.Println("EOF")
 			break
 		} else if er != nil {
 			err = er
 			return
+		}
+		// Parse record
+		rec, er := parser.ParseString(line)
+		if er != nil {
+			fmt.Printf("Rec error: %+v\n", er)
+			continue
 		}
 		// Process the record... e.g.
 		row := map[string]interface{}{}
@@ -83,16 +116,19 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 					row["method"] = fs[0]
 					row["proto"] = fs[2]
 					var args map[string][]string
-					row["url"], args, err = parseURL(fs[1])
+					row["url"], args, err = parseURL(fs[1], config.UTF8Prefix)
 					if err != nil {
-						return err
+						fmt.Printf("\nURL parse error: %v\n", err)
+						row["url"] = fs[1]
+					} else {
+						var a []byte
+						a, err = json.Marshal(args)
+						if err != nil {
+							fmt.Printf("\nArgs marshal error: %v\n", err)
+						} else {
+							row["args"] = string(a)
+						}
 					}
-					var a []byte
-					a, err = json.Marshal(args)
-					if err != nil {
-						return err
-					}
-					row["args"] = string(a) // []string{string(a)}
 				} else {
 					skip = true
 				}
@@ -113,7 +149,8 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 				return
 			}
 		}
-		row["id"] = stampID
+		row["file_id"] = fileID
+		row["stamp_id"] = stampID
 		row["line_num"] = stat.Total
 		stat.Total++
 
@@ -130,7 +167,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 			if reHost.MatchString(ref) {
 				// internal uri
 				var args map[string][]string
-				row["ref_url"], args, err = parseURL(ref)
+				row["ref_url"], args, err = parseURL(ref, config.UTF8Prefix)
 				if err != nil {
 					return err
 				}
@@ -143,33 +180,13 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 				delete(row, "referer")
 			}
 		}
+		//fmt.Printf("Rec: %+v\n", row)
 		rowsChan <- row
 	}
-	fmt.Printf("S1a")
-	close(rowsChan)
-	fmt.Printf("S1b")
-	wg.Wait()
-	fmt.Printf("S1c")
-	close(loadedChan)
-	close(rowNumChan)
-	for l := range loadedChan {
-		stat.Loaded += l
-	}
-	fmt.Printf("S1d")
-	for i := range rowNumChan {
-		if i > stat.Last {
-			stat.Last = i
-		}
-		if i < stat.First {
-			stat.First = i
-		}
-	}
-
-	fmt.Printf("S2")
 	return
 }
 
-func stream(pool *pgxpool.Pool, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int, rowNumChan chan int) {
+func stream(pool *pgxpool.Pool, id int, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int, rowNumChan chan int) {
 	defer wg.Done()
 	ctx := context.Background()
 	db, err := pool.Acquire(ctx)
@@ -178,19 +195,22 @@ func stream(pool *pgxpool.Pool, wg *sync.WaitGroup, rowChan chan (map[string]int
 	}
 
 	defer db.Release()
-	sql := "select logs.request_add(a_stamp =>$1, a_addr=>$2, a_url=>$3, a_referer=>$4, a_agent =>$5, a_method =>$6, a_status => $7,a_size =>$8,a_fresp =>$9, a_fload =>$10, a_args => $11, a_ref_url => $12, a_ref_args => $13, a_stamp_id => $14, a_row_num => $15)"
-	fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "id", "line_num"}
+	sql := "select logs.request_add(a_stamp =>$1, a_addr=>$2, a_url=>$3, a_referer=>$4, a_agent =>$5, a_method =>$6, a_status => $7,a_size =>$8,a_fresp =>$9, a_fload =>$10, a_args => $11, a_ref_url => $12, a_ref_args => $13, a_file_id => $14, a_stamp_id => $15, a_row_num => $16)"
+	fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "file_id", "stamp_id", "line_num"}
+	updateSQL := "select logs.file_update_stat(a_id => $1, a_total => $2, a_loaded => $3)"
 
 	var load, total, rowNum int
 	defer func() {
-		fmt.Printf("Rows: %d Loaded: %d Last: %d\n", total, load, rowNum)
+		fmt.Printf("Process %d: Rows: %d Loaded: %d Last: %d\n", id, total, load, rowNum)
 	}()
+	updateOffset := id * 200
+	var sentOffset, loadOffset int
 	for row := range rowChan {
 		var found bool
 		vals := values(row, fields...)
 		err = db.QueryRow(ctx, sql, vals...).Scan(&found)
 		if err != nil {
-			fmt.Printf("\nLoad for %+v error %+v\n", row, err)
+			fmt.Printf("Load for %+v error %+v\n", row, err)
 		}
 		total++
 		if found {
@@ -202,8 +222,13 @@ func stream(pool *pgxpool.Pool, wg *sync.WaitGroup, rowChan chan (map[string]int
 			rowNum = row["line_num"].(int) // store as last loaded row
 		}
 
-		if total%1000 == 0 {
-			fmt.Printf(".") // TODO: update stat
+		if (total+updateOffset)%1000 == 0 {
+			_, er := db.Exec(ctx, updateSQL, row["file_id"], total-sentOffset, load-loadOffset)
+			sentOffset = total
+			loadOffset = load
+			if er != nil {
+				fmt.Printf("Update stat error %+v\n", er)
+			}
 		}
 	}
 	loadedChan <- load
@@ -228,17 +253,16 @@ func registerStamp(pool *pgxpool.Pool, fileID int, stamp interface{}) (int, erro
 }
 
 // parseURL returns page url as string and GET args as map
-func parseURL(s string) (u string, args map[string][]string, err error) {
+func parseURL(s, UTF8Prefix string) (u string, args map[string][]string, err error) {
 	u1, err := url.Parse(s)
 	if err != nil {
-		fmt.Printf("\nURL %v\nparse error: %v\n", s, err)
 		return
 	}
 	a := u1.Query()
 
 	if len(a) > 0 {
-		raw := u1.RawQuery //fmt.Sprintf("%v", q) // TODO: make json with cp1251
-		if !strings.HasPrefix(u1.Path, "/api/") {
+		raw := u1.RawQuery
+		if !strings.HasPrefix(u1.Path, UTF8Prefix) {
 			rv := map[string][]string{}
 			// args in 1251
 			for k, v := range a {
@@ -248,8 +272,8 @@ func parseURL(s string) (u string, args map[string][]string, err error) {
 					tr := transform.NewReader(sr, charmap.Windows1251.NewDecoder())
 					buf, er := ioutil.ReadAll(tr)
 					if er != nil {
-						fmt.Printf("%+v error: %v\n", raw, err)
-						err = er
+						fmt.Printf("%+v decode error: %v\n", raw, err)
+						err = errors.Wrap(er, "args decode")
 						return
 					}
 					rv[k] = append(rv[k], string(buf))

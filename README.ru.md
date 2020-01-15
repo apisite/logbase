@@ -34,9 +34,12 @@
 
 * загрузка журналов штатными средствами ОС (в текущей версии используется curl)
 * минимальный размер дистрибутива (один бинарный файл)
-* оптимальная для анализа организация журналов (см. схему БД для nginx)
-* анализ журналов средствами БД (будет использован procapi)
-* простота добавления новых структур и форматов журналов
+* загрузка файла в несколько потоков
+* дозагрузка данных из обновленного файла
+* поддержка архивированных логов (deflate/gzip/bz2)
+* поддержка кириллицы в адресах и аргументах (в т.ч. utf8 / cp1251 в зависимости от префиса)
+* отсутствие дублей при хранении строк (адрес, аргументы, агент, реферер)
+* обновление статистики по файлу в процессе загрузки
 
 ## Статус проекта
 
@@ -44,18 +47,60 @@
 
 ## Использование
 
+### Конфигурация
+
+Размещается в БД (таблица logs.config). Пример:
+```
+select id,key,type_id,jsonb_pretty(data) as data from logs.config;
+-[ RECORD 1 ]+--------------------------------------------
+id           | 1
+key          | f091d3c43b3189c8c4cacde8cf47c00f
+type_id      | 1
+data         |  { "host": "^https?://.*tender\\.pro/",
+                  "channels": 4,
+                  "utf8_prefix": "/api/",
+                  "skip": "\\.(js|gif|png|css|ico|jpg|eot)$",
+                  "format": "$remote_addr $user1 $user2 [$time_local] \"$request\" \"$status\" $size \"$referer\"
+                            \"$user_agent\" \"$t_size\" $fresp $fload $end"
+                }
+```
+
+где
+
+* **key** - ключ авторизации для загрузки данных
+* **type_id** - тип настроек (1 - nginx)
+
+настройки nginx:
+
+* **host** - regexp для $referer, при совпадении с которым адреса будут считаться внутренними и добавляться в список своих
+* **channels** - колько потоков использовать при загрузке в БД
+* **utf8_prefix** - аргументы адресов не с таким префиксом декодируются из cp1251 
+* **skip** - regexp для $request, совпадающие строки не грузятся в БД
+* **format** - формат журнала, строка из nginx.conf
+
 ### Загрузка данных Nginx
 
 ```
 curl -X POST -o send.log -H "Content-Type: application/octet-stream" \
  -H "Auth: $KEY" -H "File: $FILE" --data-binary '@'$DIR/$FILE $HOST/upload/nginx && cat send.log 
 ```
+запрос возвращает json:
+```
+{"ID":7,"Bytes":4992,"File":"log10ki.bz2","Type":"nginx"}
+```
+
+где
+
+* **ID** - присвоенный файлу file_id (см logs.file, logs.request_data)
+* **Type** - тип обработчика
+* **Bytes** - размер полученного файла
+* **File** - имя файла
 
 ## TODO
 
-* [ ] load 1st 10 rows, calc min stamp and use it for stamp_id
-* [ ] nginx: API
-* [ ] nginx: Frontend
+* [ ] geoip
+* [ ] Grafana intergation
+* [ ] metrics
 * [ ] postgresql logs
 * [ ] journald logs
 * [ ] pgmig
