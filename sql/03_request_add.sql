@@ -1,7 +1,8 @@
 
 CREATE OR REPLACE FUNCTION request_add(
-  a_stamp TIMESTAMP
-, a_file_id INTEGER
+  a_stamp_id INTEGER
+, a_row_num INTEGER
+, a_stamp TIMESTAMP
 , a_addr INET
 , a_url TEXT
 , a_args TEXT
@@ -81,8 +82,9 @@ begin
   END IF;
 
   INSERT INTO logs.request_data (
-    stamp
-  , file_id
+    stamp_id
+  , row_num
+  , stamp
   , url_id
   , args_id
   , referer_id
@@ -96,8 +98,9 @@ begin
   , fresp
   , fload
   ) VALUES (
-    a_stamp
-  , a_file_id
+    a_stamp_id
+  , a_row_num
+  , a_stamp
   , v_url_id
   , v_args_id
   , v_referer_id
@@ -111,7 +114,7 @@ begin
   , a_fresp
   , a_fload
   )
---  ON CONFLICT DO NOTHING
+  ON CONFLICT DO NOTHING
 ;
   RETURN FOUND; -- true means 'inserted'
 end

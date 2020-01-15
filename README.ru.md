@@ -53,6 +53,7 @@ curl -X POST -o send.log -H "Content-Type: application/octet-stream" \
 
 ## TODO
 
+* [ ] load 1st 10 rows, calc min stamp and use it for stamp_id
 * [ ] nginx: API
 * [ ] nginx: Frontend
 * [ ] postgresql logs

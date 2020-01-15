@@ -99,7 +99,7 @@ func UploadEndpoint(lb *logbase.Service, logType logbase.LogType, path string) f
 		// TODO:
 		// check for "",~/,~.
 		// add path for logType
-
+		ctype := c.GetHeader("Content-Encoding")
 		body, err := c.GetRawData()
 		if err != nil {
 			c.AbortWithError(400, err)
@@ -116,7 +116,7 @@ func UploadEndpoint(lb *logbase.Service, logType logbase.LogType, path string) f
 			c.AbortWithError(400, err)
 		}
 		fh.Close()
-		fileID, err := lb.LoadFile(lbConf, path, file)
+		fileID, err := lb.LoadFile(lbConf, path, file, ctype)
 		if err != nil {
 			c.AbortWithError(400, err)
 		}

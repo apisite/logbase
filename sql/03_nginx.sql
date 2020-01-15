@@ -40,7 +40,9 @@ ALTER TABLE agent SET UNLOGGED;
 */
 
 CREATE /* UNLOGGED */ TABLE request_data (
-  file_id INTEGER REFERENCES file(id)
+  stamp_id INTEGER REFERENCES stamp(id)
+, row_num INTEGER
+-- TODO: file_id NOT NULL (not in key) - interval when row was loaded
 -- TODO: ,  request_id INTEGER NOT NULL
 , stamp TIMESTAMP
 , url_id INTEGER REFERENCES url(id)
@@ -63,7 +65,7 @@ CREATE /* UNLOGGED */ TABLE request_data (
 , fload NUMERIC
 --proto = HTTP/1.1
 --t_size = -
---, CONSTRAINT request_data_pkey PRIMARY KEY (file_id, stamp, addr, url_id, args_id)
+, CONSTRAINT request_data_pkey PRIMARY KEY (stamp_id, row_num)
 );
 
 CREATE OR REPLACE VIEW request AS

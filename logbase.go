@@ -2,7 +2,10 @@ package logbase
 
 import (
 	"compress/bzip2"
+	"compress/flate"
+	"compress/gzip"
 	"context"
+	"io"
 	//"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"os"
@@ -64,7 +67,7 @@ func (srv *Service) Auth(key string) (*FileConfig, error) {
 	return &fc, nil
 }
 
-func (srv *Service) LoadFile(cfg *FileConfig, path, file string) (int, error) {
+func (srv *Service) LoadFile(cfg *FileConfig, path, file, ctype string) (int, error) {
 
 	ctx := context.Background()
 	var fileID int
@@ -79,11 +82,11 @@ func (srv *Service) LoadFile(cfg *FileConfig, path, file string) (int, error) {
 		return 0, errors.Wrap(err, "FileBegin")
 	}
 	filePath := filepath.Join(path, file)
-	go srv.load(cfg, filePath, fileID)
+	go srv.load(cfg, filePath, ctype, fileID)
 	return fileID, nil
 }
 
-func (srv *Service) load(cfg *FileConfig, file string, fileID int) {
+func (srv *Service) load(cfg *FileConfig, file, ctype string, fileID int) {
 	// file_begin
 	ctx := context.Background()
 	fh, err := os.Open(file)
@@ -92,17 +95,38 @@ func (srv *Service) load(cfg *FileConfig, file string, fileID int) {
 		return
 	}
 	defer fh.Close()
-	logReader := bzip2.NewReader(fh)
+	srv.Log.Warnf("File %s encoding: %s", file, ctype)
 
-	var total, skip, load int
+	var reader io.Reader
+	switch ctype {
+	case "bz2":
+		reader = bzip2.NewReader(fh)
+	case "gzip":
+		gz, err := gzip.NewReader(fh)
+		if err != nil {
+			srv.Log.Errorf("Open gzip %s error: %v", file, err)
+			return
+		}
+		reader = gz
+	case "deflate":
+		def := flate.NewReader(fh)
+		reader = def
+	default:
+		// just use the default reader
+		reader = fh
+	}
+	//defer reader.Close()
+
+	var stat []interface{}
 	switch cfg.Type {
 	case Nginx:
 		srv.Log.Print("Load nginx: " + file)
-		total, skip, load, err = nginx.Run(srv.DB, cfg.Data, fileID, logReader)
+		nstat := nginx.Stat{}
+		err = nginx.Run(srv.DB, cfg.Data, fileID, reader, &nstat)
+		stat = []interface{}{fileID, err, nstat.Total, nstat.Loaded, nstat.Skipped, nstat.First, nstat.Last}
 	default:
 		err = errors.New("Unknown config type")
 	}
-	loadErr := err
 
 	// file_end
 	db, err := srv.DB.Acquire(ctx)
@@ -111,10 +135,9 @@ func (srv *Service) load(cfg *FileConfig, file string, fileID int) {
 		return
 	}
 	defer db.Release()
-
-	sql := "select logs.file_after(a_id => $1, a_error => $2, a_total=>$3, a_loaded=>$4, a_skipped=>$5)"
-	if _, err := db.Exec(ctx, sql, fileID, loadErr, total, load, skip); err != nil {
+	sql := "select logs.file_after(a_id => $1, a_error => $2, a_total=>$3, a_loaded=>$4, a_skipped=>$5, a_first => $6, a_last => $7)"
+	if _, err := db.Exec(ctx, sql, stat...); err != nil {
 		srv.Log.Errorf("FileEnd: %v", err)
 	}
-	srv.Log.Printf("File %d load stat: total %d skip %d load %d", fileID, total, skip, load)
+	srv.Log.Printf("File stat: %+v", stat)
 }

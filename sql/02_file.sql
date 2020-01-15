@@ -13,19 +13,28 @@ CREATE TABLE config (
 ,	data JSONB NOT NULL
 );
 
+CREATE SEQUENCE stamp_seq;
+CREATE TABLE stamp (
+  id INTEGER PRIMARY KEY DEFAULT nextval('stamp_seq')
+, data TIMESTAMP(0) NOT NULL UNIQUE
+);
+
 CREATE SEQUENCE file_seq;
 
 CREATE TABLE file (
   id        INTEGER PRIMARY KEY DEFAULT nextval('file_seq')
 , config_id INTEGER NOT NULL REFERENCES config(id)
 , type_id   INTEGER NOT NULL REFERENCES log_type(id)
+, stamp_id  INTEGER REFERENCES stamp(id)
 , filename  TEXT NOT NULL
-, begin_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-, end_at    TIMESTAMP
+, first     INTEGER
+, last      INTEGER
 , total     INTEGER
 , loaded    INTEGER
 , skipped   INTEGER
 , error     TEXT
+, begin_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+, end_at    TIMESTAMP
 );
 
 INSERT INTO log_type(id, code) VALUES
@@ -48,3 +57,24 @@ BEGIN
 END
 $_$;
 
+-- logs.stamp_register(a_file_id => $1, a_stamp => $2)
+
+CREATE OR REPLACE FUNCTION stamp_register(
+  a_stamp TIMESTAMP
+, a_file_id INTEGER
+) RETURNS INTEGER LANGUAGE 'plpgsql' AS $_$
+DECLARE
+  v_id INTEGER;
+BEGIN
+  INSERT INTO logs.stamp (data) VALUES (a_stamp)
+    ON CONFLICT DO NOTHING
+    RETURNING id INTO v_id
+  ;
+  IF NOT FOUND THEN
+    SELECT INTO v_id id
+    FROM logs.stamp WHERE data = a_stamp;
+  END IF;
+  UPDATE logs.file SET stamp_id = v_id WHERE id = a_file_id;
+  RETURN v_id;
+END
+$_$;

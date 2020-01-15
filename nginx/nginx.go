@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pkg/errors"
 	"io"
 	"io/ioutil"
 	"net/url"
@@ -26,7 +27,15 @@ type Config struct {
 	Format   string `json:"format"`
 }
 
-func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int, skipped int, loaded int, err error) {
+type Stat struct {
+	Total   int
+	Skipped int
+	Loaded  int
+	First   int
+	Last    int
+}
+
+func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat) (err error) {
 	config := Config{}
 	if err = json.Unmarshal([]byte(conf), &config); err != nil {
 		return
@@ -35,11 +44,12 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 	reader := gonx.NewReader(source, config.Format)
 
 	rowsChan := make(chan map[string]interface{})
-	loadedChan := make(chan int, config.Channels)
+	loadedChan := make(chan int, config.Channels)     // get counts of loaded rows
+	rowNumChan := make(chan int, config.Channels*2+1) // get 0 and first and last loaded row
 	wg := sync.WaitGroup{}
+	wg.Add(config.Channels)
 	for i := 0; i < config.Channels; i++ {
-		wg.Add(1)
-		go stream(db, &wg, rowsChan, loadedChan)
+		go stream(db, &wg, rowsChan, loadedChan, rowNumChan)
 	}
 	var reSkip, reHost *regexp.Regexp
 	if reSkip, err = regexp.Compile(config.Skip); err != nil {
@@ -48,6 +58,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 	if reHost, err = regexp.Compile(config.Host); err != nil {
 		return
 	}
+	var stampID int
 	//defer elapsed("File")()
 	for {
 		rec, er := reader.Read()
@@ -58,17 +69,13 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 			err = er
 			return
 		}
-		total++
-
 		// Process the record... e.g.
-		row := map[string]interface{}{
-			"id": fileID,
-		}
+		row := map[string]interface{}{}
 		var skip bool
 		for v := range rec.Fields() {
 			s, err := rec.Field(v)
 			if err != nil {
-				panic(err)
+				return err
 			}
 			if v == "request" {
 				fs := strings.Split(s, " ")
@@ -78,15 +85,14 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 					var args map[string][]string
 					row["url"], args, err = parseURL(fs[1])
 					if err != nil {
-						panic(err)
+						return err
 					}
 					var a []byte
 					a, err = json.Marshal(args)
 					if err != nil {
-						panic(err)
+						return err
 					}
 					row["args"] = string(a) // []string{string(a)}
-
 				} else {
 					skip = true
 				}
@@ -94,13 +100,30 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 				row[v] = s
 			}
 		}
+		if stat.Total == 0 {
+			// first file's timestamp
+			stamp, ok := row["time_local"]
+			if !ok {
+				err = errors.New("required field 'time_local' not found")
+				return
+			}
+			stampID, err = registerStamp(db, fileID, stamp)
+			fmt.Printf("File stamp: %v\n", stamp)
+			if err != nil {
+				return
+			}
+		}
+		row["id"] = stampID
+		row["line_num"] = stat.Total
+		stat.Total++
+
 		if skip {
 			fmt.Printf("\nSkip: %+v\n", row)
 			continue
 		}
 
 		if reSkip.MatchString(row["url"].(string)) {
-			skipped++
+			stat.Skipped++
 			continue
 		}
 		if ref, ok := row["referer"].(string); ok {
@@ -109,12 +132,12 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 				var args map[string][]string
 				row["ref_url"], args, err = parseURL(ref)
 				if err != nil {
-					panic(err)
+					return err
 				}
 				var a []byte
 				a, err = json.Marshal(args)
 				if err != nil {
-					panic(err)
+					return err
 				}
 				row["ref_args"] = string(a)
 				delete(row, "referer")
@@ -122,15 +145,89 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader) (total int
 		}
 		rowsChan <- row
 	}
+	fmt.Printf("S1a")
 	close(rowsChan)
+	fmt.Printf("S1b")
 	wg.Wait()
+	fmt.Printf("S1c")
 	close(loadedChan)
+	close(rowNumChan)
 	for l := range loadedChan {
-		loaded += l
+		stat.Loaded += l
 	}
+	fmt.Printf("S1d")
+	for i := range rowNumChan {
+		if i > stat.Last {
+			stat.Last = i
+		}
+		if i < stat.First {
+			stat.First = i
+		}
+	}
+
+	fmt.Printf("S2")
 	return
 }
 
+func stream(pool *pgxpool.Pool, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int, rowNumChan chan int) {
+	defer wg.Done()
+	ctx := context.Background()
+	db, err := pool.Acquire(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	defer db.Release()
+	sql := "select logs.request_add(a_stamp =>$1, a_addr=>$2, a_url=>$3, a_referer=>$4, a_agent =>$5, a_method =>$6, a_status => $7,a_size =>$8,a_fresp =>$9, a_fload =>$10, a_args => $11, a_ref_url => $12, a_ref_args => $13, a_stamp_id => $14, a_row_num => $15)"
+	fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "id", "line_num"}
+
+	var load, total, rowNum int
+	defer func() {
+		fmt.Printf("Rows: %d Loaded: %d Last: %d\n", total, load, rowNum)
+	}()
+	for row := range rowChan {
+		var found bool
+		vals := values(row, fields...)
+		err = db.QueryRow(ctx, sql, vals...).Scan(&found)
+		if err != nil {
+			fmt.Printf("\nLoad for %+v error %+v\n", row, err)
+		}
+		total++
+		if found {
+			load++
+			if rowNum == 0 {
+				// first loaded row
+				rowNumChan <- row["line_num"].(int)
+			}
+			rowNum = row["line_num"].(int) // store as last loaded row
+		}
+
+		if total%1000 == 0 {
+			fmt.Printf(".") // TODO: update stat
+		}
+	}
+	loadedChan <- load
+	rowNumChan <- rowNum
+}
+
+func registerStamp(pool *pgxpool.Pool, fileID int, stamp interface{}) (int, error) {
+
+	ctx := context.Background()
+	db, err := pool.Acquire(ctx)
+	if err != nil {
+		return 0, errors.Wrap(err, "Acquire")
+	}
+	defer db.Release()
+
+	var stampID int
+	sql := "select logs.stamp_register(a_file_id => $1, a_stamp => $2)"
+	if err := db.QueryRow(ctx, sql, fileID, stamp).Scan(&stampID); err != nil {
+		return 0, errors.Wrap(err, "StampRegister")
+	}
+	return stampID, nil
+}
+
+// parseURL returns page url as string and GET args as map
 func parseURL(s string) (u string, args map[string][]string, err error) {
 	u1, err := url.Parse(s)
 	if err != nil {
@@ -167,41 +264,7 @@ func parseURL(s string) (u string, args map[string][]string, err error) {
 	return
 }
 
-func stream(pool *pgxpool.Pool, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int) {
-	ctx := context.Background()
-	db, err := pool.Acquire(ctx)
-	if err != nil {
-		panic(err)
-	}
-	defer db.Release()
-	sql := "select logs.request_add(a_stamp =>$1, a_addr=>$2, a_url=>$3, a_referer=>$4, a_agent =>$5, a_method =>$6, a_status => $7,a_size =>$8,a_fresp =>$9, a_fload =>$10, a_args => $11, a_ref_url => $12, a_ref_args => $13, a_file_id => $14)"
-	fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "id"}
-
-	var load, total int
-	defer func() {
-		fmt.Printf("Rows: %d Loaded: %d\n", total, load)
-	}()
-
-	for row := range rowChan {
-		var found bool
-		vals := values(row, fields...)
-		err = db.QueryRow(ctx, sql, vals...).Scan(&found)
-
-		if err != nil {
-			fmt.Printf("\nLoad for %+v error %+v\n", row, err)
-		}
-		total++
-		if found {
-			load++
-		}
-		if total%1000 == 0 {
-			fmt.Printf(".") // TODO: update stat
-		}
-	}
-	loadedChan <- load
-	wg.Done()
-}
-
+// values fills a slice with map values in given names order
 func values(data map[string]interface{}, names ...string) []interface{} {
 	rv := []interface{}{}
 	var null *int
