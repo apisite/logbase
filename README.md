@@ -16,7 +16,7 @@
 
 [gd1]: https://godoc.org/github.com/apisite/logbase?status.svg
 [gd2]: https://godoc.org/github.com/apisite/logbase
-[gc1]: https://goreportcard.com/badge/github.com/apisite/tpl2x
+[gc1]: https://goreportcard.com/badge/github.com/apisite/logbase
 [gc2]: https://goreportcard.com/report/github.com/apisite/logbase
 [gr1]: https://img.shields.io/github/release-pre/apisite/logbase.svg
 [gr2]: https://github.com/apisite/logbase/releases
