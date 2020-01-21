@@ -41,7 +41,7 @@ ALTER TABLE agent SET UNLOGGED;
 
 CREATE /* UNLOGGED */ TABLE request_data (
   stamp_id INTEGER REFERENCES stamp(id)
-, row_num INTEGER
+, line_num INTEGER
 , file_id INTEGER NOT NULL -- (not in key) - allows to get time interval when row was loaded
 -- TODO: ,  request_id INTEGER NOT NULL
 , stamp TIMESTAMP
@@ -60,12 +60,15 @@ CREATE /* UNLOGGED */ TABLE request_data (
 , agent_id INTEGER REFERENCES agent(id)
 , method TEXT
 , status INTEGER
-, size INTEGER NOT NULL
+, size INTEGER
 , fresp NUMERIC
 , fload NUMERIC
+, request_size INTEGER
+, request_id TEXT
+
 --proto = HTTP/1.1
 --t_size = -
-, CONSTRAINT request_data_pkey PRIMARY KEY (stamp_id, row_num)
+, CONSTRAINT request_data_pkey PRIMARY KEY (stamp_id, line_num)
 );
 
 CREATE OR REPLACE VIEW request AS

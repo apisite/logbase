@@ -61,7 +61,7 @@ data         |  { "host": "^https?://.*tender\\.pro/",
                   "utf8_prefix": "/api/",
                   "skip": "\\.(js|gif|png|css|ico|jpg|eot)$",
                   "format": "$remote_addr $user1 $user2 [$time_local] \"$request\" \"$status\" $size \"$referer\"
-                            \"$user_agent\" \"$t_size\" $fresp $fload $end"
+                            \"$user_agent\" \"$t_size\" $fresp $fload $pipe $request_length $request_id"
                 }
 ```
 
@@ -73,7 +73,7 @@ data         |  { "host": "^https?://.*tender\\.pro/",
 настройки nginx:
 
 * **host** - regexp для $referer, при совпадении с которым адреса будут считаться внутренними и добавляться в список своих
-* **channels** - колько потоков использовать при загрузке в БД
+* **channels** - сколько потоков использовать при загрузке в БД
 * **utf8_prefix** - аргументы адресов не с таким префиксом декодируются из cp1251 
 * **skip** - regexp для $request, совпадающие строки не грузятся в БД
 * **format** - формат журнала, строка из nginx.conf
@@ -81,7 +81,7 @@ data         |  { "host": "^https?://.*tender\\.pro/",
 ### Загрузка данных Nginx
 
 ```
-curl -X POST -o send.log -H "Content-Type: application/octet-stream" \
+curl -X POST -o send.log -H "Content-Type: application/octet-stream" -H "Content-Encoding: bz2" \
  -H "Auth: $KEY" -H "File: $FILE" --data-binary '@'$DIR/$FILE $HOST/upload/nginx && cat send.log 
 ```
 запрос возвращает json:
@@ -95,6 +95,22 @@ curl -X POST -o send.log -H "Content-Type: application/octet-stream" \
 * **Type** - тип обработчика
 * **Bytes** - размер полученного файла
 * **File** - имя файла
+
+### Алгоритм загрузки файла
+
+* по URL (/nginx) пределяем тип файла
+* по заголовку Auth - ключ, по которому извлекаем config
+* по заголовку `Content-Encoding` определяем архиватор
+* регистрируем начало загрузки файла в БД и получаем его `_file_id`
+* по первой корректной строке файла определяем его timestamp, по которому из БД получаем `_stamp_id`
+* далее для каждой строки файла
+  * получаем map с ключами из format (если строка не по формату - пишем в лог и пропускаем)
+  * request меняем на `method`, `proto` и unescaped `url`, `args`
+  * если префикс url не совпадает с utf8_prefix - декодируем аргументы из 1251 (TODO: no_utf_enc)
+  * разбираем аргументы в map и конвертируем в json
+  * добавляем  `_stamp_id`, `_file_id`, `_line_num`
+  * формируем список аргументов (если arg_prefix = '-', как массив, иначе - map с добавлением префикса в ключ)
+  * вызываем ф-ю request_add
 
 ## TODO
 

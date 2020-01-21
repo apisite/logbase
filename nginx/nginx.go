@@ -130,6 +130,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 						}
 					}
 				} else {
+					// not HTTP request
 					skip = true
 				}
 			} else {

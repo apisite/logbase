@@ -1,8 +1,12 @@
+/*
+  Load nginx logs row
+  fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "file_id", "stamp_id", "line_num"}
 
+*/
 CREATE OR REPLACE FUNCTION request_add(
   a_stamp_id INTEGER
-, a_row_num INTEGER
 , a_file_id INTEGER
+, a_line_num INTEGER
 , a_stamp TIMESTAMP
 , a_addr INET
 , a_url TEXT
@@ -19,7 +23,9 @@ CREATE OR REPLACE FUNCTION request_add(
 , a_status INTEGER
 , a_size INTEGER
 , a_fresp NUMERIC
-, a_fload NUMERIC
+, a_fload NUMERIC DEFAULT NULL
+, a_request_size INTEGER DEFAULT NULL
+, a_request_id TEXT DEFAULT NULL
 ) RETURNS BOOL LANGUAGE plpgsql AS $_$
 declare
   v_url_id INTEGER;
@@ -85,7 +91,7 @@ begin
   INSERT INTO logs.request_data (
     stamp_id
   , file_id
-  , row_num
+  , line_num
   , stamp
   , url_id
   , args_id
@@ -99,10 +105,12 @@ begin
   , size
   , fresp
   , fload
+  , request_size
+  , request_id
   ) VALUES (
     a_stamp_id
   , a_file_id
-  , a_row_num
+  , a_line_num
   , a_stamp
   , v_url_id
   , v_args_id
@@ -116,6 +124,8 @@ begin
   , a_size
   , a_fresp
   , a_fload
+  , a_request_size
+  , a_request_id
   )
   ON CONFLICT DO NOTHING
 ;
