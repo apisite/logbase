@@ -178,6 +178,9 @@ dcape-stop: down
 psql: ## Run psql via postgresql docker container
 	@docker exec -it $$DCAPE_DB psql -U $$PGUSER -d $$PGDATABASE
 
+psql-add:
+	@cat add.sql | docker exec -i $$DCAPE_DB psql -U $$PGUSER -d $$PGDATABASE
+
 ## Run local psql
 psql-local:
 	@psql -h localhost
