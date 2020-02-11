@@ -37,9 +37,10 @@
 * загрузка файла в несколько потоков
 * дозагрузка данных из обновленного файла
 * поддержка архивированных логов (deflate/gzip/bz2)
-* поддержка кириллицы в адресах и аргументах (в т.ч. utf8 / cp1251 в зависимости от префиса)
+* поддержка кириллицы в адресах и аргументах (в т.ч. utf8 / cp1251 в зависимости от префикса)
 * отсутствие дублей при хранении строк (адрес, аргументы, агент, реферер)
 * обновление статистики по файлу в процессе загрузки
+* размещение настроек в БД
 
 ## Статус проекта
 
@@ -52,17 +53,38 @@
 Размещается в БД (таблица logs.config). Пример:
 ```
 select id,key,type_id,jsonb_pretty(data) as data from logs.config;
--[ RECORD 1 ]+--------------------------------------------
-id           | 1
-key          | f091d3c43b3189c8c4cacde8cf47c00f
-type_id      | 1
-data         |  { "host": "^https?://.*tender\\.pro/",
-                  "channels": 4,
-                  "utf8_prefix": "/api/",
-                  "skip": "\\.(js|gif|png|css|ico|jpg|eot)$",
-                  "format": "$remote_addr $user1 $user2 [$time_local] \"$request\" \"$status\" $size \"$referer\"
-                            \"$user_agent\" \"$t_size\" $fresp $fload $pipe $request_length $request_id"
-                }
+
+id      | 1
+key     | f091d3c43b3189c8c4cacde8cf47c00f
+type_id | 1
+data    | {                                                                                                                                                                             +
+        |     "host": "^https?://.*tender\\.pro/",                                                                                                                                      +
+        |     "skip": "\\.(js|gif|png|css|ico|jpg|eot)$",                                                                                                                               +
+        |     "fields": [                                                                                                                                                               +
+        |         "stamp_id",                                                                                                                                                           +
+        |         "file_id",                                                                                                                                                            +
+        |         "line_num",                                                                                                                                                           +
+        |         "time_local",                                                                                                                                                         +
+        |         "remote_addr",                                                                                                                                                        +
+        |         "url",                                                                                                                                                                +
+        |         "args",                                                                                                                                                               +
+        |         "ref_url",                                                                                                                                                            +
+        |         "ref_args",                                                                                                                                                           +
+        |         "referer",                                                                                                                                                            +
+        |         "user_agent",                                                                                                                                                         +
+        |         "method",                                                                                                                                                             +
+        |         "status",                                                                                                                                                             +
+        |         "size",                                                                                                                                                               +
+        |         "fresp",                                                                                                                                                              +
+        |         "fload",                                                                                                                                                              +
+        |         "request_size",                                                                                                                                                       +
+        |         "request_id"                                                                                                                                                          +
+        |     ],                                                                                                                                                                        +
+        |     "format": "$remote_addr $user1 $user2 [$time_local] \"$request\" \"$status\" $size \"$referer\" \"$user_agent\" \"$t_size\" $fresp $fload $end $request_size $request_id",+
+        |     "channels": 4,                                                                                                                                                            +
+        |     "utf8_prefix": "/api/"                                                                                                                                                    +
+        | }
+
 ```
 
 где
@@ -77,6 +99,7 @@ data         |  { "host": "^https?://.*tender\\.pro/",
 * **utf8_prefix** - аргументы адресов не с таким префиксом декодируются из cp1251 
 * **skip** - regexp для $request, совпадающие строки не грузятся в БД
 * **format** - формат журнала, строка из nginx.conf
+* **fields** - список имен переменных для вызова ф-и `logs.request_add`
 
 ### Загрузка данных Nginx
 
