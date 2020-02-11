@@ -1,5 +1,5 @@
 
-CREATE OR REPLACE VIEW sizes AS
+CREATE OR REPLACE VIEW table_size AS
 SELECT *, pg_size_pretty(total_bytes) AS total
     , pg_size_pretty(index_bytes) AS INDEX
     , pg_size_pretty(toast_bytes) AS toast

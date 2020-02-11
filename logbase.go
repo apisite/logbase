@@ -127,6 +127,10 @@ func (srv *Service) load(cfg *FileConfig, file, ctype string, fileID int) {
 	default:
 		err = errors.New("Unknown config type")
 	}
+	if err != nil {
+		srv.Log.Errorf("Run: %v", err)
+		return
+	}
 
 	// file_end
 	db, err := srv.DB.Acquire(ctx)

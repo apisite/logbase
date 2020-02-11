@@ -22,11 +22,12 @@ import (
 )
 
 type Config struct {
-	Channels   int    `json:"channels"`
-	Skip       string `json:"skip"` // SkipRegExp
-	Host       string `json:"host"` // HostRegExp
-	Format     string `json:"format"`
-	UTF8Prefix string `json:"utf8_prefix"` // url with args encoded in utf8 (cp1251 used otherwise)
+	Channels   int      `json:"channels"`
+	Skip       string   `json:"skip"` // SkipRegExp
+	Host       string   `json:"host"` // HostRegExp
+	Format     string   `json:"format"`
+	Fields     []string `json:"fields"`
+	UTF8Prefix string   `json:"utf8_prefix"` // url with args encoded in utf8 (cp1251 used otherwise)
 }
 
 type Stat struct {
@@ -51,12 +52,12 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	parser := gonx.NewParser(config.Format)
 
 	rowsChan := make(chan map[string]interface{})
-	loadedChan := make(chan int, config.Channels)     // get counts of loaded rows
-	rowNumChan := make(chan int, config.Channels*2+1) // get 0 and first and last loaded row
+	loadedChan := make(chan int, config.Channels)     // get count of loaded rows
+	rowNumChan := make(chan int, config.Channels*2+1) // get 0, first and last loaded row
 	wg := sync.WaitGroup{}
 	wg.Add(config.Channels)
 	for i := 0; i < config.Channels; i++ {
-		go stream(db, i, &wg, rowsChan, loadedChan, rowNumChan)
+		go stream(db, i, &wg, rowsChan, loadedChan, rowNumChan, config.Fields)
 	}
 	var reSkip, reHost *regexp.Regexp
 	if reSkip, err = regexp.Compile(config.Skip); err != nil {
@@ -90,7 +91,6 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	for {
 		line, er := reader.ReadString('\n')
 		if er == io.EOF {
-			fmt.Println("EOF")
 			break
 		} else if er != nil {
 			err = er
@@ -187,17 +187,21 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	return
 }
 
-func stream(pool *pgxpool.Pool, id int, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int, rowNumChan chan int) {
+func stream(pool *pgxpool.Pool, id int, wg *sync.WaitGroup, rowChan chan (map[string]interface{}), loadedChan chan int, rowNumChan chan int, fields []string) {
 	defer wg.Done()
 	ctx := context.Background()
 	db, err := pool.Acquire(ctx)
 	if err != nil {
 		panic(err)
 	}
-
 	defer db.Release()
-	sql := "select logs.request_add(a_stamp =>$1, a_addr=>$2, a_url=>$3, a_referer=>$4, a_agent =>$5, a_method =>$6, a_status => $7,a_size =>$8,a_fresp =>$9, a_fload =>$10, a_args => $11, a_ref_url => $12, a_ref_args => $13, a_file_id => $14, a_stamp_id => $15, a_row_num => $16)"
-	fields := []string{"time_local", "remote_addr", "url", "referer", "user_agent", "method", "status", "size", "fresp", "fload", "args", "ref_url", "ref_args", "file_id", "stamp_id", "line_num"}
+
+	placeHolders := []string{}
+	for i, n := range fields {
+		placeHolders = append(placeHolders, fmt.Sprintf("a_%s => $%d", n, i+1))
+	}
+
+	sql := fmt.Sprintf("select logs.request_add(%s)", strings.Join(placeHolders, ","))
 	updateSQL := "select logs.file_update_stat(a_id => $1, a_total => $2, a_loaded => $3)"
 
 	var load, total, rowNum int
