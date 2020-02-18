@@ -170,15 +170,16 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 				var args map[string][]string
 				row["ref_url"], args, err = parseURL(ref, config.UTF8Prefix)
 				if err != nil {
-					return err
+					fmt.Printf("\nFound unparseable referer URL: %+v\n", err)
+				} else {
+					var a []byte
+					a, err = json.Marshal(args)
+					if err != nil {
+						return err
+					}
+					row["ref_args"] = string(a)
+					delete(row, "referer")
 				}
-				var a []byte
-				a, err = json.Marshal(args)
-				if err != nil {
-					return err
-				}
-				row["ref_args"] = string(a)
-				delete(row, "referer")
 			}
 		}
 		//fmt.Printf("Rec: %+v\n", row)
