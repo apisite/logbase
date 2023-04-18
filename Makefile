@@ -94,7 +94,7 @@ export
 all: help
 
 build: dep ## Build the binary file for server
-	@go build -i -v -ldflags "-X main.version=`git describe --tags`" ./cmd/$(PRG)/
+	@go build -v -ldflags "-X main.version=`git describe --tags`" ./cmd/$(PRG)/
 
 ## Build app used in docker from scratch
 #build-standalone: cov vet lint lint-more
