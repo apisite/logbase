@@ -7,15 +7,11 @@ import (
 	"fmt"
 	"github.com/pkg/errors"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
-
-	"golang.org/x/text/encoding/charmap"
-	"golang.org/x/text/transform"
 
 	"github.com/jackc/pgx/v4/pgxpool"
 	"github.com/satyrius/gonx"
@@ -27,7 +23,6 @@ type Config struct {
 	Host       string   `json:"host"` // HostRegExp
 	Format     string   `json:"format"`
 	Fields     []string `json:"fields"`
-	UTF8Prefix string   `json:"utf8_prefix"` // url with args encoded in utf8 (cp1251 used otherwise)
 }
 
 type Stat struct {
@@ -42,9 +37,6 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 	config := Config{}
 	if err = json.Unmarshal([]byte(conf), &config); err != nil {
 		return
-	}
-	if config.UTF8Prefix == "" {
-		config.UTF8Prefix = "/"
 	}
 	// Create reader and call Read method until EOF
 	// gonx.Reader uses goroutines and row order not fixed, so we use just parser
@@ -116,7 +108,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 					row["method"] = fs[0]
 					row["proto"] = fs[2]
 					var args map[string][]string
-					row["url"], args, err = parseURL(fs[1], config.UTF8Prefix)
+					row["url"], args, err = parseURL(fs[1])
 					if err != nil {
 						fmt.Printf("\nURL parse error: %v\n", err)
 						row["url"] = fs[1]
@@ -168,7 +160,7 @@ func Run(db *pgxpool.Pool, conf []byte, fileID int, source io.Reader, stat *Stat
 			if reHost.MatchString(ref) {
 				// internal uri
 				var args map[string][]string
-				row["ref_url"], args, err = parseURL(ref, config.UTF8Prefix)
+				row["ref_url"], args, err = parseURL(ref)
 				if err != nil {
 					fmt.Printf("\nFound unparseable referer URL: %+v\n", err)
 				} else {
@@ -259,39 +251,12 @@ func registerStamp(pool *pgxpool.Pool, fileID int, stamp interface{}) (int, erro
 }
 
 // parseURL returns page url as string and GET args as map
-func parseURL(s, UTF8Prefix string) (u string, args map[string][]string, err error) {
+func parseURL(s string) (string, map[string][]string, error) {
 	u1, err := url.Parse(s)
 	if err != nil {
-		return
+		return "", nil, err
 	}
-	a := u1.Query()
-
-	if len(a) > 0 {
-		raw := u1.RawQuery
-		if !strings.HasPrefix(u1.Path, UTF8Prefix) {
-			rv := map[string][]string{}
-			// args in 1251
-			for k, v := range a {
-				rv[k] = []string{}
-				for _, i := range v {
-					sr := strings.NewReader(i)
-					tr := transform.NewReader(sr, charmap.Windows1251.NewDecoder())
-					buf, er := ioutil.ReadAll(tr)
-					if er != nil {
-						fmt.Printf("%+v decode error: %v\n", raw, err)
-						err = errors.Wrap(er, "args decode")
-						return
-					}
-					rv[k] = append(rv[k], string(buf))
-				}
-			}
-			args = rv
-		} else {
-			args = a
-		}
-	}
-	u = u1.Path
-	return
+	return u1.Path, u1.Query(), nil
 }
 
 // values fills a slice with map values in given names order
