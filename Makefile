@@ -35,7 +35,8 @@ APP_IMAGE  ?= $(PRG)
 PROJECT_NAME ?= $(PRG)
 
 # docker-compose image
-DC_VER ?= 1.23.2
+DC_IMAGE ?= dcape-compose
+DC_VER   ?= latest
 
 # -----------------------------------------------------------------------------
 # dcape part
@@ -137,7 +138,7 @@ dc: docker-compose.yml ## Run docker-compose (make dc CMD=build)
 	  -v /var/run/docker.sock:/var/run/docker.sock \
 	  -v $$PWD:$$PWD \
 	  -w $$PWD \
-	  docker/compose:$(DC_VER) \
+	  $(DC_IMAGE):$(DC_VER) \
 	  -p $$PROJECT_NAME \
 	  $(CMD)
 
@@ -178,8 +179,9 @@ dcape-stop: down
 psql: ## Run psql via postgresql docker container
 	@docker exec -it $$DCAPE_DB psql -U $$PGUSER -d $$PGDATABASE
 
-psql-add:
-	@cat add.sql | docker exec -i $$DCAPE_DB psql -U $$PGUSER -d $$PGDATABASE
+FILE ?= report.sql
+psql-rpt:
+	@cat $(FILE) | docker exec -i $$DCAPE_DB psql -U $$PGUSER -d $$PGDATABASE
 
 ## Run local psql
 psql-local:
